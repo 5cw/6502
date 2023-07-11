@@ -202,7 +202,7 @@ impl CPU6502 {
                 if cond {
                     let offset = self.fetch_byte(self.prog_counter + 1) as u16;
                     self.prog_counter += offset;
-                    if offset > 127 {self.prog_counter -= 256}
+                    if offset > 0x7F {self.prog_counter -= 0x100}
                 } else {
                     self.prog_counter += 2;
                 }

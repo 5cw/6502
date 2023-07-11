@@ -43,13 +43,12 @@ pub fn assemble(s: String) -> Vec<u8> {
     let mut labels: HashMap<&str, u16> = HashMap::new();
     let mut bare_instructions = vec![];
     let mut lines = s.lines()
-        .map(|line| line.split(";").next().unwrap().trim())
-        .filter(|line| !line.is_empty()); //remove comments
+        .map(|line| line.split(";").next().unwrap().trim()); //remove comments
     let mut pc = 0;
     use AdrMode::*;
     use IdxReg::*;
     use Operand::*;
-    for line in lines{
+    for line in lines {
         let mut parts: Vec<&str> = line.split_whitespace().collect();
         let (label, cm, operand, name) = match parts[..] {
             [first] => {
@@ -61,6 +60,15 @@ pub fn assemble(s: String) -> Vec<u8> {
                 }
             },
             [first, second] => {
+                if first == "ORG" {
+                    if let Some((operand, Absolute | ZeroPage)) = decode_num(second) {
+                        pc = match operand {
+                            Byte(num) => num as u16,
+                            Short(num) => num,
+                            _ => panic!("invalid ORG address")
+                        }
+                    }
+                }
                 let m = match_opcode(first);
                 if m.is_some() {
                     (None, m, Some(second), Some(first))
@@ -158,14 +166,12 @@ pub fn assemble(s: String) -> Vec<u8> {
             if 0 == (i.mode_mask & (1 << mode_code)) && !(i.mode == Relative && i.code & 0b11111 == 0b10000) {
                 panic!("Cannot use {:?} addressing mode for {}", i.mode, i.name)
             }
+
             program.push(i.code | (mode_code << 2));
 
-
-
-
             //only the bitshift operations both exist in a mode and can have no operands
-        } else if i.mode_mask > 0{
-            if (i.mode_mask & 0b100 == 0 || i.code & 0b11 != 0b10) {
+        } else if i.mode_mask > 0 {
+            if i.mode_mask & 0b100 == 0 || i.code & 0b11 != 0b10 {
                 panic!("Cannot use {} with no operands", i.name)
             } else {
                 program.push(i.code + 8);

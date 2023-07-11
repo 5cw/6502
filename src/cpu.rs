@@ -155,9 +155,9 @@ impl CPU6502 {
 
         let mut a_mode = false; //accumulator mode is unique to a few instructions so it is handled specially
 
-        //determine address based on mode and group, also execute
-        //pushes/pops, branches, and sets/clears because they
-        //are grouped differently to other instructions
+        /*determine address based on mode and group, also execute
+        pushes/pops, branches, and sets/clears because they
+        are grouped differently to other instructions*/
         let address = match (mode, group) {
             (0b000, 0b01) => Some(self.fetch_byte(
                 self.fetch_byte(self.prog_counter + 1)
@@ -191,12 +191,12 @@ impl CPU6502 {
                 None
             },
             (0b010, 0b01) => None, //immediate 2 bytes
-            (0b100, 0b00) => { //branches
-                let cond = ((self.proc_flags & match code & 0b110 {
-                    0b000 => FLAG_N,
-                    0b010 => FLAG_V,
-                    0b100 => FLAG_C,
-                    0b110 => FLAG_Z,
+            (0b100, 0b00) => { //branch
+                let cond = ((self.proc_flags & match code {
+                    0b000 | 0b001 => FLAG_N, //BPL / BMI if plus/minus
+                    0b010 | 0b011 => FLAG_V, //BVC / BVS if overflow clear/set
+                    0b100 | 0b101 => FLAG_C, //BCC / BCS if carry clear/set
+                    0b110 | 0b111 => FLAG_Z, //BNE / BEW if not equal/equal
                     _ => 0
                 }) > 0) == (code & 1 > 0); //branch if flag bit is equal to third bit of code
                 if cond {
@@ -220,14 +220,17 @@ impl CPU6502 {
             }, //zero page + x 2 bytes
             (0b110, 0b00) => { //clears and sets
                 let mask = match code & 0b110 {
-                    0b000 => FLAG_C,
-                    0b010 => FLAG_I,
-                    0b100 => FLAG_V,
-                    0b110 => FLAG_D,
+                    0b000 | 0b001 => FLAG_C, //CLC / SEC carry flag
+                    0b010 | 0b011 => FLAG_I, //CLI / SEI interrupt flag
+                    // (can only set with operation which overflows)
+                    // 0b100 taken by TYA
+                            0b101 => FLAG_V,       //CLV clear overflow flag
+                    0b110 | 0b111 => FLAG_D, //CLD / SED decimal flag
                     _ => 0
                 };
                 self.proc_flags &= !mask;
-                self.proc_flags |= mask * (code & 1); // set if bit 3 of code is 1, clear if 0
+                // set the bit if third bit of code is set and it isn't clear overflow
+                self.proc_flags |= mask * (code & 1) * (code != 0b101) as u8;
                 self.prog_counter += 1;
                 return
             }

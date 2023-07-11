@@ -1,4 +1,4 @@
-# Rust 6502 emulator and assembler
+#  rust 6502 emulator and assembler
 
 This was just a little project to get back into coding more frequently.
 

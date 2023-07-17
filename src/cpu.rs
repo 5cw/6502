@@ -19,7 +19,8 @@ pub(crate) struct CPU6502 {
     memory: [u8; 0x10000],
 }
 
-const INSTRUCTION_NAMES: [&str; 255] = ["BRK b","ORA (d,X)","cop b","ora d,S","Tsb d","ORA d","ASL d","ora [d]","PHP","ORA #","ASL A","phd","Tsb a","ORA a","ASL a","ora al",
+const INSTRUCTION_NAMES: [&str; 255] =
+    ["BRK b","ORA (d,X)","cop b","ora d,S","Tsb d","ORA d","ASL d","ora [d]","PHP","ORA #","ASL A","phd","Tsb a","ORA a","ASL a","ora al",
     "BPL r","ORA (d),Y","Ora (d)","ora (d,S),Y","Trb d","ORA d,X","ASL d,X","ora [d],Y","CLC","ORA a,Y","Inc A","tcs","Trb a","ORA a,X","ASL a,X","ora al,X",
     "JSR a","AND (d,X)","jsl al","and d,S","BIT d","AND d","ROL d","and [d]","PLP","AND #","ROL A","pld","BIT a","AND a","ROL a","and al",
     "BMI r","AND (d),Y","And (d)","and (d,S),Y","Bit d,X","AND d,X","ROL d,X","and [d],Y","SEC","AND a,Y","Dec A","tsc","Bit a,X","AND a,X","ROL a,X","and al,X",
@@ -35,6 +36,7 @@ const INSTRUCTION_NAMES: [&str; 255] = ["BRK b","ORA (d,X)","cop b","ora d,S","T
     "BNE r","CMP (d),Y","Cmp (d)","cmp (d,S),Y","pei d","CMP d,X","DEC d,X","cmp [d],Y","CLD","CMP a,Y","Phx","stp","jml (a)","CMP a,X","DEC a,X","cmp al,X",
     "CPX #","SBC (d,X)","sep #","sbc d,S","CPX d","SBC d","INC d","sbc [d]","INX","SBC #","NOP","xba","CPX a","SBC a","INC a","sbc al",
     "BEQ r ,SBC (d),Y","Sbc (d)","sbc (d,S),Y","pea a","SBC d,X","INC d,X","sbc [d],Y","SED","SBC a,Y","Plx","xce","jsr (a,X)","SBC a,X","INC a,X","sbc al,X"];
+
 
 impl CPU6502 {
     pub fn new(mem: [u8; 0x10000]) -> Self {
@@ -139,7 +141,7 @@ impl CPU6502 {
                 },
                 0b10 => { //RTI return from interrupt
                     self.proc_flags = self.pop_byte();
-                    self.prog_counter = self.pop_short();
+                    self.prog_counter = self.pop_short() + 1;
                 },
                 0b01 => { //JSR jump to subroutine
                     self.push_short(self.prog_counter + 2);
@@ -159,10 +161,10 @@ impl CPU6502 {
         pushes/pops, branches, and sets/clears because they
         are grouped differently to other instructions*/
         let address = match (mode, group) {
-            (0b000, 0b01) => Some(self.fetch_byte(
+            (0b000, 0b01) => Some(self.fetch_byte( //(zero page + x) 2 bytes
                 self.fetch_byte(self.prog_counter + 1)
                     .wrapping_add(self.x) as u16)
-                as u16), //(zero page + x) 2 bytes
+                as u16),
             (0b000, _) => None, //immediate 2 bytes
             (0b001, _) => Some(self.fetch_byte(self.prog_counter + 1) as u16), //zero page 2 bytes
             (0b011, _) => Some(self.fetch_short(self.prog_counter + 1)), //absolute 3 bytes
@@ -191,15 +193,15 @@ impl CPU6502 {
                 None
             },
             (0b010, 0b01) => None, //immediate 2 bytes
-            (0b100, 0b00) => { //branch
-                let cond = ((self.proc_flags & match code {
+            (0b100, 0b00) => {
+                //branch if flag bit is equal to third bit of code
+                if ((self.proc_flags & match code { //branch
                     0b000 | 0b001 => FLAG_N, //BPL / BMI if plus/minus
                     0b010 | 0b011 => FLAG_V, //BVC / BVS if overflow clear/set
                     0b100 | 0b101 => FLAG_C, //BCC / BCS if carry clear/set
-                    0b110 | 0b111 => FLAG_Z, //BNE / BEW if not equal/equal
+                    0b110 | 0b111 => FLAG_Z, //BNE / BEQ if not equal/equal
                     _ => 0
-                }) > 0) == (code & 1 > 0); //branch if flag bit is equal to third bit of code
-                if cond {
+                }) > 0) == (code & 1 > 0) {
                     let offset = self.fetch_byte(self.prog_counter + 1) as u16;
                     self.prog_counter += offset;
                     if offset > 0x7F {self.prog_counter -= 0x100}
@@ -208,9 +210,9 @@ impl CPU6502 {
                 }
                 return
             }
-            (0b100, 0b01) => Some(self.fetch_byte(
+            (0b100, 0b01) => Some(self.fetch_byte( // (zero page) + y 2 bytes
                 self.fetch_byte(self.prog_counter + 1) as u16) as u16
-                + self.y as u16), // (zero page) + y 2 bytes
+                + self.y as u16),
             (0b101, _) => {
                 let offset = match (group, code) {
                     (0b10, 0b100 | 0b101) => self.y,
@@ -264,13 +266,14 @@ impl CPU6502 {
                         self.accumulator |= val,
                     0b001 => //AND bitwise and
                         self.accumulator &= val,
-                    0b010 => //EOR bitwise xor
+                    0b010 => //EOR bitwise exclusive or
                         self.accumulator ^= val,
                     0b011 | 0b111 => //ADC/SBC add/subtract with carry
                         {
-                            let sub = code & 0b100 > 0;
+                            let sub = code == 0b111;
                             let carry = self.proc_flags & FLAG_C;
-                            let carry = if self.proc_flags & FLAG_D > 0 { //decimal mode
+                            let carry = if self.proc_flags & FLAG_D > 0 {
+                                //binary coded decimal mode
                                 let (ad, vd) =
                                     ((self.accumulator / 16 * 10 + self.accumulator % 16) as i32,
                                      (val / 16 * 10 + val % 16) as i32);
@@ -288,6 +291,7 @@ impl CPU6502 {
 
                                 buffer > if sub {0} else {100}
                             } else {
+                                //binary mode
                                 let (a, v) = (self.accumulator as i32, val as i32);
 
                                 let buffer = if sub { //SBC
@@ -311,7 +315,7 @@ impl CPU6502 {
                     _ => {} //All cases covered
                 }
                 match code {
-                    0b100 | 0b110 => {} //STA does not need to set zn, CMP does it differently
+                    0b100 | 0b110 => {} //STA does not need to set zn, CMP sets it differently
                     _ => self.set_zn(self.accumulator)
                 }
             }
@@ -354,7 +358,7 @@ impl CPU6502 {
             0b00 => match code { //group 3
                 0b001 => //BIT bit test
                     {
-                        self.proc_flags &= !(FLAG_Z | FLAG_V | FLAG_N); //clear z, v, n
+                        self.proc_flags &= !(FLAG_Z | FLAG_V | FLAG_N); //clear Z, V, N
                         if val & self.accumulator < 1 {
                             self.proc_flags |= FLAG_Z
                         }
@@ -394,6 +398,216 @@ impl CPU6502 {
         }
     }
 
+    pub fn exec_next_redux(&mut self) {
+
+        enum Dest {
+            Address(u16),
+            Accumulator,
+            X,
+            Y,
+            Immediate,
+            Implied
+        }
+        use Dest::*;
+
+        let instruction = self.fetch_instruction();
+
+        let code = (instruction & 0xF0) >> 4;
+        let mode = instruction & 0xF;
+        let limited_mode = mode % 8;
+        let limited = code < 7;
+        let split = mode > 7;
+        let def = code > 0xC;
+        let index= if !limited || (code & 0b11 == 0) {self.y} else {self.x} as u16;
+
+
+        let byte = self.fetch_byte(self.prog_counter + 1) as u16;
+        let ind_byte = self.fetch_byte(byte) as u16;
+        let short = self.fetch_short(self.prog_counter + 1);
+        let ind_short = self.fetch_short(short);
+
+
+        let dest = match (limited_mode, split && !limited) {
+            (1, false) => Address(short), //Absolute
+            (1, true) => Address(ind_short), //(abs)
+            (2, _) => Address(short + index), //abs, x/y
+            (3, false) => Address(byte), //Zero Page
+            (3, true) => Address(ind_byte), //(zp)
+            (4, _) => Address(byte + index), //zp, x/y
+            (5, false) => Address(self.fetch_short(byte + index)), //(zp, x/y)
+            (5, true) => Address(ind_byte + self.y as u16), //(zp), y
+            (6, false) => if code < 0x6 {Immediate} else {Accumulator},
+            (6, true) => Address(self.fetch_short(short + self.x as u16)), //(abs, x)
+            (7, true) => Address(ind_short + self.y as u16), //(abs), y
+            _ => match (mode, def) {
+                (0x6, false) => X,
+                (0x7, false) => Y,
+                (0x6 | 0x7, true) | (0xE, _ ) => Immediate, // treating branches as immediate
+                _ => { Implied }
+            }
+        };
+
+        let bytes =
+            if limited_mode < 0x2 || ((0xD..=0xE).contains(&mode) && !limited) {3}
+            else if (0x2..=0x4).contains(&(limited_mode)) || (mode == 0xE && limited) {2}
+            else {
+                match dest {
+                    Immediate => 2,
+                    _ => 1
+                }
+            };
+
+        self.prog_counter += bytes;
+
+        let val = match &dest {
+            Address(address) => self.fetch_byte(*address),
+            Immediate => byte as u8,
+            X => self.x,
+            Y => self.y,
+            _ => 0
+        };
+
+        if mode == 0 && limited {
+            match code {
+                0xF => { //BRK forcing interrupt
+                    self.push_short(self.prog_counter);
+                    self.push_byte(self.proc_flags);
+                    self.proc_flags |= FLAG_B;
+                    self.prog_counter = self.fetch_short(0xFFFE);
+                },
+                0x6 | 0xE => { //RTS/RTI return from subroutine / return from interrupt
+                    if code == 0xE { self.proc_flags = self.pop_byte() }
+                    self.prog_counter = self.pop_short() + 1;
+                },
+                0x8..=0xB => {
+                    let acc = code & 1 > 0;
+                    if code < 0xA { //PHP/PHA push process flags / accumulator
+                        self.push_byte( if acc {self.accumulator} else {self.proc_flags})
+                    } else { //PLP/PLA pull process flags / accumulator
+                        let pop = self.pop_byte();
+                        if acc {
+                            self.accumulator = pop;
+                        } else {
+                            self.proc_flags = pop;
+                        }
+                    }
+                },
+                0xD | _ => () //NOP
+
+            }
+            return
+        } else if mode == 0xF {
+            let flag = match (code & 0b11, limited) {
+                (0x0, _) =>     FLAG_C, //CLC, SEC, BCC, BCS
+                (0x1, false) => FLAG_I, //CLI, SEI
+                (0x1, true) =>  FLAG_Z, //          BNE, BEQ
+                (0x2, _) =>     FLAG_V, //CLV,      BVC, BVS
+                (0x3, false) => FLAG_D, //CLD, SED
+                (0x3, true) | _ => FLAG_N //        BPL, BMI
+            };
+            if limited { //branches
+                if (self.proc_flags & flag > 0) == (code > 0xB) {
+                    self.prog_counter += val as u16;
+                    if val > 0x7F {self.prog_counter -= 0x100}
+                }
+            } else { //clears/sets
+                self.proc_flags &= !flag;
+                self.proc_flags |= flag * (code > 0x3) as u8
+            }
+            return
+        }
+
+
+
+        let secondary = (mode > 0x5 && !def) || mode > 0x6;
+
+        match code {
+            0x0 | 0x4 => { //ADC/SBC
+                let sub = code == 0x4;
+                let carry = self.proc_flags & FLAG_C;
+                let carry = if self.proc_flags & FLAG_D > 0 {
+                    //binary coded decimal mode
+                    let (ad, vd) =
+                        ((self.accumulator / 16 * 10 + self.accumulator % 16) as i32,
+                         (val / 16 * 10 + val % 16) as i32);
+
+                    let buffer = if sub { //SBC
+                        ad - vd - 1
+                    } else { //ADC
+                        ad + vd
+                    } + carry as i32;
+
+                    self.accumulator = {
+                        let m = (buffer % 100) as u8;
+                        m%10+m/10*16
+                    };
+
+                    buffer > if sub {0} else {100}
+                } else {
+                    //binary mode
+                    let (a, v) = (self.accumulator as i32, val as i32);
+
+                    let buffer = if sub { //SBC
+                        a - v - 1
+                    } else { //ADC
+                        a + v
+                    } + carry as i32;
+
+                    self.accumulator = (buffer % 0x100) as u8;
+                    buffer > if sub {0} else {0x100}
+                };
+                self.proc_flags &= !FLAG_C;
+                if carry{self.proc_flags |= FLAG_C}
+            }
+            0x1 => //ORA bitwise or
+                self.accumulator |= val,
+            0x2 => //AND bitwise and
+                self.accumulator &= val,
+            0x3 => //EOR bitwise exclusive or
+                self.accumulator ^= val,
+            0x5 => if !(6..=7).contains(&mode) {
+                //CMP I deleted CMP X and CMP Y those are covered by CPX A and CPY A
+                self.compare(self.accumulator, val)
+            } else if mode == 7 {
+                //CXY compare x to y i made this one up
+                self.compare(self.x, self.y)
+            }
+            0x6 | 0x7 => //JSR / JMP
+            {
+                if code == 0x6 { self.push_short(self.prog_counter + 2) } // JSR
+                self.prog_counter = match dest {
+                    Address(address) => address,
+                    _ => val as u16
+                };
+            }
+            _ => match (code, secondary) {
+                (0x8 | 0x9 | 0xA | 0xB, false) => {
+                    let carry = self.proc_flags & FLAG_C & code;
+                    self.proc_flags &= !FLAG_C;
+                    let (val, overflow) = if code < 0b010 {
+                        ((val << 1) | carry, (0 < (0b10000000 & val)) as u8)
+                    } else {
+                        ((val >> 1) | (carry * 0b10000000), (1 & val))
+                    };
+                    self.proc_flags |= overflow;
+                    self.set_zn(val);
+                    match dest {
+                        Address(address) => self.store_byte(Some(address), val),
+                        _ => self.accumulator = val
+                    }
+                },
+                (0xD, false) => { //BIT
+                    self.proc_flags &= !(FLAG_Z | FLAG_V | FLAG_N); //clear Z, V, N
+                    if val & self.accumulator < 1 {
+                        self.proc_flags |= FLAG_Z
+                    }
+                    self.proc_flags |= val & 0b11000000;
+                }
+            }
+        }
+
+
+    }
 
     fn fetch_instruction(&self) -> u8 {
         self.memory[self.prog_counter as usize]

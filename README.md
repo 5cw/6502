@@ -8,7 +8,7 @@ This was just a little project to get back into coding more frequently.
 
 tried my hand at reorganizing the 6502 opcodes
 
-<iframe src="https://docs.google.com/spreadsheets/d/e/2PACX-1vRvVaSI80LN8ZKo1b-XaSaV4YMD5VVVtm9c1_yJoy8foDK-HCUhdIizXOdTDTOwh8PQ406uLyA0suNF/pubhtml?gid=657397901&amp;single=true&amp;widget=true&amp;headers=false"></iframe>
+[Spreadsheet](https://docs.google.com/spreadsheets/d/e/2PACX-1vRvVaSI80LN8ZKo1b-XaSaV4YMD5VVVtm9c1_yJoy8foDK-HCUhdIizXOdTDTOwh8PQ406uLyA0suNF/pubhtml?gid=657397901&single=true)
 
 first of all, the goals for this project are arbitrary and emotional. I just found myself frustrated with some of the strange decisions that were made for the opcodes, I'm sure there were reasons for all of them, this is for fun.
 

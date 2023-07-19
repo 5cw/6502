@@ -23,7 +23,6 @@ Goals:
 
 
 ![table.png](table.png)
-![small_table.png](small_table.png)
 
 ### Things I did that I like
 An instruction can usually be figured out by looking at it in hex. The first hex digit (primarily) determines the instruction (I call it the code), the second digit (primarily) determines the addressing mode (I call it the mode). This also means that different modes of the same instruction are always sequential.(**) (****) I grouped instructions that are friends closer together visually and hexwise. Except for mode xF, code 0x,1x,2x will always be bitwise operations, 4x and 5x will always be adds and subtracts, 6x and 7x will always be jumps, and 8x,9x,Ax will always be stores and loads of a predictable register (X,Y,A respectively). I also just noticed Ax is STA and LDA which is kind of fun!

@@ -60,11 +60,11 @@ Let's talk about addressing modes. the 6502 broke its modes up into 3 groups, so
 
 unlimited instructions take up 15 addressing modes and begin with a 0. xF unlimited is reserved for branch instructions. These are for math, bitwise operations, and jumps.
 
-limited instructions start with a 1. primary limited instructions take up 8 addressing modes and look like 1bbb0bbb. (**) (****) secondary limited instructions take up 6 addressing modes (7 including pulls) xF limited is reserved for clears, sets, and BRK FF.
+limited instructions start with a 1. primary limited instructions take up 8 addressing modes and look like `1bbb0bbb`. (**) (****) secondary limited instructions take up 6 addressing modes (7 including pulls) and look like `1bbb1bbb`. xF limited is reserved for clears, sets, and `BRK FF`.
 
-for all instructions the first 6 modes are absolute, absolute + x, zero page, zero page + x, indirect (zero page + x), and immediate/accumulator.* [explanation of these terms](https://en.wikipedia.org/wiki/MOS_Technology_6502#Addressing)
+for all instructions the first 6 modes are absolute, absolute + x, zero page, zero page + x, indirect (zero page + x), and immediate/accumulator.* [explanation of these terms](https://www.nesdev.org/obelisk-6502-guide/addressing.html)
 
-for unlimited and primary limited, the 7th and 8th (x6 and x7) modes are X and Y modes. these modes did not exist on the 6502, and they allow us to do things like directly add y to the accumulator, which as far as I can tell, was not possible. It also allows TXA, TAY, TYA, TAX and the later added TXY and TYX to go in the slots which correspond to storing a register to the register whose mode we're in.
+for unlimited and primary limited, the 7th and 8th (`x6` and `x7`) modes are X and Y modes. these modes did not exist on the 6502, and they allow us to do things like directly add y to the accumulator, which as far as I can tell, was not possible. It also allows TXA, TAY, TYA, TAX and the later added TXY and TYX to go in the slots which correspond to storing a register to the register whose mode we're in.
 
 secondary limited instructions only take up 6 addressing modes except for the loads which include pulls from the stack. (imagine ROR as a phantom LDP)
 
@@ -80,7 +80,7 @@ I would like there to be simpler behavior for determining immediate vs. accumula
 Just like in the original instruction set, if loading or storing X in an addressing mode which references X, replace X with Y.
 
 ### **
-Added new pushes and pulls for X and Y. To push X, Y, or A to the stack, use the ST_ code and mode that would store them to themselves. To pull them from the stack, LD_ in mode xE. PHP and PLP can be conceptualized as if code Fx were STP and LDP, except since there's no mode that would push the process flags to themselves, PHP goes in the gap left by comparing Y to X (redundant to CXY). PLP is in the correct column, and they differ by only a bit! 
+Added new pushes and pulls for X and Y. To push X, Y, or A to the stack, use the `ST_` opcode and mode that would store them to themselves. To pull them from the stack, `LD_` in mode `xE`. PHP and PLP can be conceptualized as if code Fx were `STP` and `LDP`, except since there's no mode that would push the process flags to themselves, PHP goes in the gap left by comparing Y to X (redundant to CXY). PLP is in the correct column, and they differ by only a bit! 
 
 ```
 PHP F6 11110110
@@ -89,10 +89,10 @@ PLP FE 11111110
 
 This is also true of PHX and PLX, but only because mode x6 happens to be the X column. Y and ACC don't have this basically useless but deeply satisfying property because their modes are x7 and x5. I just wanted to tell myself there was a good reason.
 
-I kind of wish the pushes were all in one column like the pulls but this would require major reorganization and I like the x and y modes so i needed something fitting to do with STX X, STY Y, and STA A.
+I kind of wish the pushes were all in one column like the pulls but this would require major reorganization and I like the x and y modes so i needed something fitting to do with `STX X`,` STY Y`, and `STA A`.
 
 ### ***
-Many instructions don't make sense to use the accumulator mode, and many don't make sense to use immediate. because of this, `bbbbb101` is both immediate mode and accumulator mode depending on the instruction. But BIT is a rare instruction that benefits from having both options (and indeed does have both options in later revisions of the 6502) and I had a slot left over, so I shuffled some instructions around so that BIT in mode xE is accumulator mode.
+Many instructions don't make sense to use the accumulator mode, and many don't make sense to use immediate. because of this, `bbbbb101` is both immediate mode and accumulator mode depending on the instruction. But `BIT` is a rare instruction that benefits from having both options (and indeed does have both options in later revisions of the 6502) and I had a slot left over, so I shuffled some instructions around so that `BIT` in mode `xE` is accumulator mode.
 
 ### ****
-TSX and TXS are awkward instructions to place, so I put them in the gap left by comparing x to itself and y to itself. (gross, ugly hack)
+`TSX` and `TXS` are awkward instructions to place, so I put them in the gap left by comparing x to itself and y to itself. (gross, ugly hack)

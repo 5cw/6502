@@ -62,7 +62,15 @@ pub fn assemble(s: String, redux: bool) -> Vec<u8> {
         match parse_line(line, if redux {match_opcode_redux} else {match_opcode}, pc) {
             Directive::Org(num) => pc = num,
             Directive::LabelDir(s) => { labels.insert(s.as_str(), pc); },
-            Directive::Instr(i) => bare_instructions.push(i)
+            Directive::Instr(i) => {
+                pc += match i.mode {
+                    Implied | Accumulator | XReg | YReg | Stack => 1,
+                    Immediate | Relative => 2,
+                    Absolute(long)|Indirect(long)|Indexed(_, long)|
+                    IndexedIndirect(long)|IndirectIndexed(_, long) => 2 + long as u16
+                };
+                bare_instructions.push(i)
+            }
         }
     }
 
@@ -109,104 +117,6 @@ pub fn assemble(s: String, redux: bool) -> Vec<u8> {
     program
 }
 
-fn final_code_redux(i: &Instruction) -> u8 {
-    if i.code & 0b111 > 0 {
-        return i.code
-    }
-    //0bSAIXY
-    let mask = match i.mode {
-        Relative => RELATIVE_MASK,
-        Stack => 0b10000,
-        Accumulator => 0b1000,
-        Immediate => 0b100,
-        XReg => 0b10,
-        YReg => 0b1,
-        _ => 0
-    };
-    if mask > 0 && mask & i.mode_mask < 0 {
-        panic!("Cannot use {:?} addressing mode for {}", i.mode, i.name)
-    }
-    let mode = match (i.mode, i.code) {
-        (Indexed(X, _)|IndirectIndexed(X, false), 0x80 | 0x88)
-            => panic!("cannot use STX or LDX with X index"),
-        (Indexed(Y,false), 0x80 | 0x88) => 1,
-        (Indexed(Y,true), 0x80 | 0x88) => 3,
-        (IndirectIndexed(Y, false), 0x80 | 0x88) => 4,
-        (Stack, 0x90) => 7, //STY Stack -> PHY
-        (Stack, 0xA0) => 5, //STA Stack -> PHA
-        (Accumulator, 0xA8) => 6, //BIT A
-        _ => match i.mode {
-            Absolute(true) => 0,
-            Indexed(X, true) => 1,
-            Absolute(false) => 2,
-            Indexed(X, false) => 3,
-            IndirectIndexed(X, false) => 4,
-            Immediate | Accumulator => 5,
-            XReg | Stack => 6,
-            YReg => 7,
-            _ => if i.code < 0x80 {
-                match i.mode {
-                    Indirect(true) => 8,
-                    Indexed(Y, true) => 9,
-                    Indirect(false) => 0xA,
-                    Indexed(Y, false) => 0xB,
-                    IndexedIndirect(false) => 0xC,
-                    IndirectIndexed(X, true) => 0xD,
-                    IndexedIndirect(true) => 0xE,
-                    _ => panic!("Cannot use {:?} addressing mode for {}", i.mode, i.name)
-                }
-            } else {
-                panic!("Cannot use {:?} addressing mode for {}", i.mode, i.name)
-            }
-        }
-    };
-    i.code | mode
-}
-
-fn final_code(i: &Instruction) -> u8 {
-    if i.operand != NoOperand {
-        let mode_code = match (i.mode, i.code & 0b11) {
-            (Relative,_) => 0,
-            (Indirect(true),_) => 0b1000,
-            (Absolute(true),_) => 0b011,
-            (Absolute(false),_) => 0b001,
-            (Indexed(_,false),_) => 0b101,
-            (Indexed(X, true),_) => 0b111,
-            (Indexed(Y, true),0b01) => 0b110,
-            (Indexed(Y, true),0b10) => 0b111,
-            (Immediate, 0b01) => 0b010,
-            (Immediate, _) => 0b000,
-            (Accumulator, 0b01) => 0b010,
-            (IndirectIndexed(X, false), 0b01) => 0b100,
-            (IndexedIndirect(false), 0b01) => 0b000,
-            _ => panic!("Cannot use {:?} addressing mode for {}", i.mode, i.name)
-        };
-
-        match (i.mode, i.name.as_str()) {
-            (Indexed(Y, false), "LDX" | "STX") => (),
-            (Indexed(Y, false), _) => panic!("Only LDX and STX can use that addressing mode"),
-            (Indexed(X, true) | Indexed(X, true), "LDX" | "STX") =>
-                panic!("Cannot use {:?} addressing mode for {}", i.mode, i.name),
-            _ => ()
-        }
-
-        if 0 == (i.mode_mask & (1 << mode_code)) && !(i.mode == Relative && i.code & 0b11111 == 0b10000) {
-            panic!("Cannot use {:?} addressing mode for {}", i.mode, i.name)
-        }
-
-        i.code | (mode_code << 2)
-
-        //only the bitshift operations both exist in a mode and can have no operands
-    } else if i.mode_mask > 0 {
-        if i.mode_mask & 0b100 == 0 || i.code & 0b11 != 0b10 {
-            panic!("Cannot use {} with no operands", i.name)
-        } else {
-            i.code + 8
-        }
-    } else {
-        i.code
-    }
-}
 
 fn parse_line(line: &str, match_opcode: fn(&str) -> Option<(u8, u16)>, pc: u16) -> Directive {
     let parts: Vec<&str> = line.split_whitespace().collect();
@@ -311,8 +221,8 @@ fn decode_num(num: &str) -> Option<(Operand, AdrMode)> {
     };
 
     let zp = match val {
-        Byte(_) => true,
-        _ => false
+        Byte(_) => false,
+        _ => true
     };
 
     let idx = match ind {
@@ -393,6 +303,53 @@ fn match_opcode(op: &str) -> Option<(u8,u16)> {
     };
     Some((code, mode_mask))
 }
+
+fn final_code(i: &Instruction) -> u8 {
+    if i.operand != NoOperand {
+        let mode_code = match (i.mode, i.code & 0b11) {
+            (Relative,_) => 0,
+            (Indirect(true),_) => 0b1000,
+            (Absolute(true),_) => 0b011,
+            (Absolute(false),_) => 0b001,
+            (Indexed(_,false),_) => 0b101,
+            (Indexed(X, true),_) => 0b111,
+            (Indexed(Y, true),0b01) => 0b110,
+            (Indexed(Y, true),0b10) => 0b111,
+            (Immediate, 0b01) => 0b010,
+            (Immediate, _) => 0b000,
+            (Accumulator, 0b01) => 0b010,
+            (IndirectIndexed(X, false), 0b01) => 0b100,
+            (IndexedIndirect(false), 0b01) => 0b000,
+            _ => panic!("Cannot use {:?} addressing mode for {}", i.mode, i.name)
+        };
+
+        match (i.mode, i.name.as_str()) {
+            (Indexed(Y, false), "LDX" | "STX") => (),
+            (Indexed(Y, false), _) => panic!("Only LDX and STX can use that addressing mode"),
+            (Indexed(X, true) | Indexed(X, true), "LDX" | "STX") =>
+                panic!("Cannot use {:?} addressing mode for {}", i.mode, i.name),
+            _ => ()
+        }
+
+        if 0 == (i.mode_mask & (1 << mode_code)) && !(i.mode == Relative && i.code & 0b11111 == 0b10000) {
+            panic!("Cannot use {:?} addressing mode for {}", i.mode, i.name)
+        }
+
+        i.code | (mode_code << 2)
+
+        //only the bitshift operations both exist in a mode and can have no operands
+    } else if i.mode_mask > 0 {
+        if i.mode_mask & 0b100 == 0 || i.code & 0b11 != 0b10 {
+            panic!("Cannot use {} with no operands", i.name)
+        } else {
+            i.code + 8
+        }
+    } else {
+        i.code
+    }
+}
+
+
 fn match_opcode_redux(op: &str) -> Option<(u8,u16)> {
     let op = op.to_uppercase();
     let code = match op.as_str() {
@@ -442,4 +399,60 @@ fn match_opcode_redux(op: &str) -> Option<(u8,u16)> {
         _ => 0
     };
     Some((code, mode_mask))
+}
+
+fn final_code_redux(i: &Instruction) -> u8 {
+    if i.code & 0b111 > 0 {
+        return i.code
+    }
+    //0bSAIXY
+    // this must be calculated separately because mode 5 is both accumulator and immediate
+    // and that would interpret STX #14 as a valid alias for TXA but TXA doesn't take any args
+    let mask = match i.mode {
+        Relative => RELATIVE_MASK,
+        Stack => 0b10000,
+        Accumulator => 0b1000,
+        Immediate => 0b100,
+        XReg => 0b10,
+        YReg => 0b1,
+        _ => 0
+    };
+    if mask > 0 && mask & i.mode_mask < 0 {
+        panic!("Cannot use {:?} addressing mode for {}", i.mode, i.name)
+    }
+    let mode = match (i.mode, i.code) {
+        (Indexed(X, _)|IndirectIndexed(X, false), 0x80 | 0x88)
+        => panic!("cannot use STX or LDX with X index"),
+        (Indexed(Y,false), 0x80 | 0x88) => 1,
+        (Indexed(Y,true), 0x80 | 0x88) => 3,
+        (IndirectIndexed(Y, false), 0x80 | 0x88) => 4,
+        (Stack, 0x90) => 7, //STY Stack -> PHY
+        (Stack, 0xA0) => 5, //STA Stack -> PHA
+        (Accumulator, 0xA8) => 6, //BIT A
+        _ => match i.mode {
+            Absolute(true) => 0,
+            Indexed(X, true) => 1,
+            Absolute(false) => 2,
+            Indexed(X, false) => 3,
+            IndirectIndexed(X, false) => 4,
+            Immediate | Accumulator => 5,
+            XReg | Stack => 6,
+            YReg => 7,
+            _ => if i.code < 0x80 {
+                match i.mode {
+                    Indirect(true) => 8,
+                    Indexed(Y, true) => 9,
+                    Indirect(false) => 0xA,
+                    Indexed(Y, false) => 0xB,
+                    IndexedIndirect(false) => 0xC,
+                    IndirectIndexed(X, true) => 0xD,
+                    IndexedIndirect(true) => 0xE,
+                    _ => panic!("Cannot use {:?} addressing mode for {}", i.mode, i.name)
+                }
+            } else {
+                panic!("Cannot use {:?} addressing mode for {}", i.mode, i.name)
+            }
+        }
+    };
+    i.code | mode
 }
